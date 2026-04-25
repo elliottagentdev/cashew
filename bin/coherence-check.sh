@@ -38,7 +38,7 @@ find_spec() {
 
 extract_files() {
     local spec_path="$1"
-    grep -oE '[[:alnum:]_./-]+\.(py|ts|js|jsx|tsx|go|rs|sh|yaml|yml|json|sql|md|toml)' "$spec_path" \
+    grep -oE '[[:alnum:]_./-]+\.(py|ts|js|go|rs|sh|yaml|yml|json|sql)' "$spec_path" \
         | sed 's|^\./||' \
         | sort -u
 }
