@@ -20,10 +20,7 @@
 #   dev kill <session>               - Kill a specific session
 #   dev kill-all                     - Kill all sessions
 
-PROJECTS_DIR="$HOME/projects"  # Set by /setup skill during installation
-if [ -d "$HOME/Projects" ]; then
-    PROJECTS_DIR="$HOME/Projects"
-fi
+PROJECTS_DIR="$(realpath "$HOME/Projects/factory")"  # Resolve symlinks so Pi session dirs match
 SEP="_"  # Session name separator (internal session names don't allow /)
 
 # Colors
@@ -461,6 +458,16 @@ attach_session() {
                 auto_command=(pi)
                 ;;
             claude)
+                auto_command=(claude --dangerously-skip-permissions)
+                ;;
+            foreman)
+                # CWD override: Foreman always runs in ~/.foreman/
+                target_dir="$HOME/.foreman"
+                mkdir -p "$target_dir"
+                mkdir -p "$target_dir/continuity"
+                mkdir -p "$target_dir/rc-links"
+                # Write sentinel file for session name resolution (W0-10)
+                printf '%s' "$session_name" > "$target_dir/continuity/.session-name"
                 auto_command=(claude --dangerously-skip-permissions)
                 ;;
         esac
@@ -1104,6 +1111,35 @@ send_pi() {
         return
     fi
 
+    # Claude Code sessions: deliver via tmux send-keys, not queue file
+    # Claude Code TUI has no queue poller (message-queue.ts is Pi-only)
+    if [[ "$sub" == "foreman" || "$sub" == "claude" ]]; then
+        local session_name
+        session_name=$(to_session_name "$input")
+
+        # Verify session exists
+        if ! tmux has-session -t "$session_name" 2>/dev/null; then
+            echo "Session not found: $session_name" >&2
+            exit 1
+        fi
+
+        # Send message text followed by Enter to submit
+        # Using -l (literal) flag to prevent tmux from interpreting special chars
+        tmux send-keys -t "$session_name" -l "$message"
+        sleep 0.3
+        tmux send-keys -t "$session_name" Enter
+
+        local display_name
+        display_name=$(to_display_name "$session_name")
+        echo -e "Sent to ${GREEN}${display_name}${RESET} (claude-code): $message"
+
+        # --await is not supported for Claude Code sessions (no pi_subscribe)
+        if [ "$await_completion" -eq 1 ]; then
+            echo -e "${CYAN}Note:${RESET} --await is not supported for Claude Code sessions"
+        fi
+        return
+    fi
+
     if [ -n "$sub" ]; then
         local sub_dir="$target_dir/$sub"
         local dot_sub_dir="$target_dir/.${sub}"
@@ -1368,7 +1404,9 @@ review_session() {
             return
         fi
         local ts_s=$((ts_ms / 1000))
-        date -r "$ts_s" "+%Y-%m-%d %H:%M:%S"
+        date -d "@${ts_s}" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || \
+            date -r "$ts_s" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || \
+            echo "unknown"
     }
 
     local last_line
@@ -1583,6 +1621,20 @@ reboot_sessions() {
             fi
         fi
     done
+
+    # Recreate Foreman session if it was previously running
+    if [ -f "$HOME/.foreman/continuity/.session-name" ]; then
+        local foreman_session
+        foreman_session=$(cat "$HOME/.foreman/continuity/.session-name")
+        if ! tmux has-session -t "$foreman_session" 2>/dev/null; then
+            if [ "$dry_run" -eq 1 ]; then
+                echo "Would recreate Foreman session: $foreman_session"
+            else
+                printf '[INFO] Recreating Foreman session: %s\n' "$foreman_session"
+                "$0" "forge/main/foreman"
+            fi
+        fi
+    fi
 }
 
 requirements() {
@@ -1828,7 +1880,9 @@ pi_status() {
             return
         fi
         local ts_s=$((ts_ms / 1000))
-        date -r "$ts_s" "+%Y-%m-%d %H:%M:%S"
+        date -d "@${ts_s}" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || \
+            date -r "$ts_s" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || \
+            echo "unknown"
     }
 
     echo -e "${BOLD}Session:${RESET} $input"
@@ -2246,7 +2300,9 @@ pi_subscribe() {
             return
         fi
         local ts_s=$((ts_ms / 1000))
-        date -r "$ts_s" "+%Y-%m-%d %H:%M:%S"
+        date -d "@${ts_s}" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || \
+            date -r "$ts_s" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || \
+            echo "unknown"
     }
 
     render_line() {
@@ -2617,6 +2673,9 @@ case "${1:-}" in
         ;;
     "reboot")
         reboot_sessions "${@:2}"
+        ;;
+    "foreman")
+        exec "$0" "forge/main/foreman"
         ;;
     "ls"|"list")
         if [ "${2:-}" = "--full" ] || [ "${2:-}" = "--tree" ]; then
