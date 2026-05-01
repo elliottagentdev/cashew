@@ -452,6 +452,7 @@ attach_session() {
     echo -e "Session: ${GREEN}$display_name${RESET}"
 
     local auto_command=()
+    local is_foreman_session=false
     if [ -n "$sub" ]; then
         case "$sub" in
             pi)
@@ -469,6 +470,7 @@ attach_session() {
                 # Write sentinel file for session name resolution (W0-10)
                 printf '%s' "$session_name" > "$target_dir/continuity/.session-name"
                 auto_command=(claude --dangerously-skip-permissions)
+                is_foreman_session=true
                 ;;
         esac
     else
@@ -504,6 +506,14 @@ attach_session() {
         cmd_line="${auto_command[*]}"
         tmux send-keys -t "$session_name" "$cmd_line" C-m
     fi
+
+    if [ "$is_foreman_session" = "true" ]; then
+        (
+            sleep 9
+            tmux send-keys -t "$session_name" "/model anthropic/claude-opus-4-6" C-m
+        ) &
+    fi
+
     echo -e "${GREEN}Started:${RESET} $display_name (detached)"
     echo -e "Attach with: ${CYAN}dev $display_name${RESET}"
 }
