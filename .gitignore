@@ -1,0 +1,4 @@
+# Local Claude Code per-user settings (machine-specific permissions, etc.)
+# This file contains personal allowlist entries for the local agent and should
+# NOT be committed. Project-wide defaults live in .claude/settings.json (if any).
+.claude/settings.local.json
